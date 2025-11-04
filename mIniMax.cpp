@@ -224,13 +224,13 @@ pair<int,int> minMax(vector<vector<char>> state,int depth, bool turn, int lastMo
 int main() {
     
     int input,depth;
-    // cout<<"Choose the depth of the search, it must be a number >=1\n";
-    // cin >> depth;
+    cout<<"Choose the depth of the search, it must be a number >=1\n";
+    cin >> depth;
     
-    // while(depth <1){
-    //     cout << "Invalid number. Choose the depth of the search, it must be a number >=1\n";
-    //     cin >> depth;
-    // }
+    while(depth <1){
+        cout << "Invalid number. Choose the depth of the search, it must be a number >=1\n";
+        cin >> depth;
+    }
 
     cout << "Press 1 to start playing and 0 for the computer to start\n";
     cin >> input;
@@ -254,14 +254,14 @@ int main() {
     while(!gameIsOver(state, lastMove, tie, computerWon)){
         cout<<"\n";
         if(turn){ 
-            cout<<"Choose a number from 1 to 9, according to the board below\n";
+            cout<<"Choose a number from 1 to 7, according to the board below\n";
             display(state);
             int move;
             cin>> move;
             
             if(move > 7 || move < 1 || state[move -1][m-1] != '*' ){
                     while(move > 7 || move < 1 || state[move -1][m-1] != '*'){
-                        if(move>7 || move<1)cout<<"Choose a number between 1 and 9 inclusive that is available\n";
+                        if(move>7 || move<1)cout<<"Choose a number between 1 and 7 inclusive that is available\n";
                         else cout<<"This column is filed\n";
                     
                         display(state);
@@ -274,7 +274,7 @@ int main() {
         }
         
         else{
-            auto move = minMax(state, 7,turn, lastMove);
+            auto move = minMax(state, depth,turn, lastMove);
             makeMove(state,move.second, turn);
             lastMove = move.second;
         }
