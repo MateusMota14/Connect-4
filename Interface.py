@@ -305,8 +305,8 @@ class Connect4GUI:
                 messagebox.showerror(
                     "Motor nao encontrado",
                     "Nao encontrei o executavel do motor (mIniMax.exe).\n\n"
-                    "Compile mIniMax.cpp, por exemplo:\n"
-                    "  g++ -O2 -o output/mIniMax.exe mIniMax.cpp\n\n"
+                    "Compile main.cpp, Board.cpp e MinMax.cpp, por exemplo:\n"
+                    "  g++ -O2 -mpopcnt -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp\n\n"
                     "e coloque o arquivo gerado em output/mIniMax.exe ou na "
                     "mesma pasta deste script."
                 )
@@ -1475,7 +1475,7 @@ def main():
             print(
                 "Nao encontrei o executavel do motor (output/mIniMax.exe).\n"
                 "Compile primeiro, ou aponte o caminho com --engine:\n"
-                "  g++ -O2 -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp"
+                "  g++ -O2 -mpopcnt -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp"
             )
             return
 
@@ -1528,8 +1528,8 @@ def main():
                 "Nao encontrei: " + ", ".join(faltando) + ".\n"
                 "Compile os dois builds que voce quer comparar e coloque em output/, "
                 "ou aponte os caminhos com --engine-a/--engine-b. Exemplo:\n"
-                "  g++ -O2 -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp\n"
-                "  g++ -O2 -o output/mIniMax-novo.exe main.cpp Board.cpp MinMax.cpp"
+                "  g++ -O2 -mpopcnt -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp\n"
+                "  g++ -O2 -mpopcnt -o output/mIniMax-novo.exe main.cpp Board.cpp MinMax.cpp"
             )
             return
         # --depth-a/--depth-b permitem equalizar builds cuja indexacao de
@@ -1575,7 +1575,7 @@ def main():
             print(
                 "Motor nao encontrado. Compile main.cpp, Board.cpp e "
                 "MinMax.cpp para output/mIniMax.exe primeiro:\n"
-                "  g++ -O2 -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp"
+                "  g++ -O2 -mpopcnt -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp"
             )
             return
         our_side = "player1" if args.side == "first" else "player2"
