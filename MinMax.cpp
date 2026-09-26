@@ -3,7 +3,7 @@
 #include <chrono>
 #include <climits>
 #include <cstdlib>
-#include <map>
+#include <unordered_map>
 
 using namespace std;
 
@@ -19,13 +19,16 @@ namespace
     bool abortado = false;
     long long nos = 0;
 
-    tuple<ULL, ULL, bool> makeKey(ULL pos, ULL mask, bool playerTurn)
-    {
-        if (!playerTurn)
-            pos = pos ^ mask;
-        return {pos, mask, playerTurn};
-    }
-    map<ULL, int> tt;
+    // flag: o que "eval" significa em relacao ao valor verdadeiro da posicao
+    enum { EXACT = 0, UPPER = 1, LOWER = 2 };
+
+    struct Entry {
+        int eval;       // valor que a busca devolveu
+        int depth;      // profundidade RESTANTE com que o no foi buscado
+        int bestMove;
+        int flag;       // EXACT, UPPER (valor <= eval) ou LOWER (valor >= eval)
+    };
+    unordered_map<ULL, Entry> tt;
 
     int eval(ULL pos, ULL mask, bool playerTurn)
     {
@@ -195,6 +198,7 @@ void initBottom()
 void clearTt()
 {
     tt.clear();
+    for (ULL t : {0ULL, 1ULL << 63}) tt[bottom | t] = {0, 100, 3, EXACT};
 }
 
 int currentEval(ULL pos, ULL mask, bool playerTurn)
@@ -216,9 +220,30 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
         if (tie)
             return {0, 0};
         if (!playerTurn)
-            return {1e9 + depth, 0};
-        return {-1e9 - depth, 0};
+        return {1e9 + depth, 0};
+    return {-1e9 - depth, 0};
     }
+
+    ULL key = ((playerTurn ? pos : pos ^ mask) + mask + bottom) | ((ULL)playerTurn << 63);
+    auto it = tt.find(key);
+    
+    if (it != tt.end()){
+        auto cachedDepth = it->second.depth;
+        firstMove = it->second.bestMove;
+
+        if (cachedDepth >= depth){
+            if (it->second.flag == 0)
+                return {it->second.eval, firstMove};
+            else if (it->second.flag == 2)
+                alfa = max(alfa, it->second.eval);
+            else if (it->second.flag == 1)
+                beta = min(beta, it->second.eval);
+            if (alfa >= beta)
+                return {it->second.eval, firstMove};
+        }
+    }
+    int flag, alfa0 =alfa, beta0 = beta;
+
     int order[7] , n =0;
     if (firstMove != -1) order[n++] = firstMove;
 
@@ -228,7 +253,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
     if (playerTurn)
     {
         int mx = INT_MIN;
-        int mark = -1;
+        int move = -1;
 
         for (int col : order)
         {
@@ -241,7 +266,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
 
                 if (temp > mx){
                     mx = temp;
-                    mark = col;
+                    move = col;
                 }
 
                 alfa = max(alfa, temp);
@@ -252,7 +277,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
 
                 if (temp.first > mx){
                     mx = temp.first;
-                    mark = col;
+                    move = col;
                 }
 
                 alfa = max(alfa, temp.first);
@@ -263,12 +288,18 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
             if (alfa >= beta)
                 break;
         }
-        return {mx, mark};
+        
+        if(mx > alfa0 && mx < beta0) flag =0;
+        else if (mx <= alfa0) flag =1;
+        else if (mx >= beta0) flag =2;
+
+        if(!abortado) tt[key] = {mx, depth, move, flag};
+        return {mx, move};
     }
     else
     {
         int mn = INT_MAX;
-        int mark = -1;
+        int move = -1;
 
         for (int col : order)
         {
@@ -280,7 +311,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
                 auto temp = eval(pos, mask, playerTurn);
                 if (temp < mn){
                     mn = temp;
-                    mark = col;
+                    move = col;
                 }
 
                 beta = min(beta, temp);
@@ -290,7 +321,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
                 auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, -1);
                 if (temp.first < mn){
                     mn = temp.first;
-                    mark = col;
+                    move = col;
                 }
 
                 beta = min(beta, temp.first);
@@ -302,7 +333,13 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
             if (alfa >= beta)
                 break;
         }
-        return {mn, mark};
+
+        if(mn > alfa0 && mn < beta0) flag =0;
+        else if (mn <= alfa0) flag =1;
+        else if (mn >= beta0) flag =2;
+
+        if(!abortado) tt[key] = {mn, depth, move, flag};
+        return {mn, move};
     }
 }
 

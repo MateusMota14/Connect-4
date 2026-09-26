@@ -8,11 +8,14 @@ using ULL = unsigned long long;
 int column, row;
 
 int getTopInColumn(ULL mask, int col){
-    int top = 0;
-    while(mask & (1ULL << (col * (row +1)+ top))) {
-        top++;
-    }
-    return top;
+    ULL columnMask = 1ULL << (col * (row + 1) ) |
+        1ULL << (col * (row + 1) + 1) |
+        1ULL << (col * (row + 1) + 2) |
+        1ULL << (col * (row + 1) + 3) |
+        1ULL << (col * (row + 1) + 4) |
+        1ULL << (col * (row + 1) + 5) ;
+
+    return __builtin_popcountll(mask & columnMask);         
 }
 
 void changeBoard(ULL& pos, ULL& mask, int col, bool undoMove, bool playerTurn){
