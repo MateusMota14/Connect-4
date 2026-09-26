@@ -36,7 +36,7 @@ int main() {
             mask = 0;
             lastMove = -1;
             turn = (starter == 1);
-            clearTP();
+            clearTt();
 
             if (!turn) {
                 int maxDepth = timeLimitMs > 0 ? column * row : depth;

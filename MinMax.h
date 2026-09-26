@@ -15,7 +15,7 @@ void initBottom();
 
 // Limpa a transposition table (chamar ao iniciar uma nova partida, para nao
 // deixar o cache crescer sem limite entre partidas).
-void clearTP();
+void clearTt();
 
 // Expoe o valor de eval() (privada em MinMax.cpp) so para fins de
 // observacao/depuracao -- nao e usada pela busca em si.

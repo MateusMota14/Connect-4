@@ -19,6 +19,12 @@ namespace
     bool abortado = false;
     long long nos = 0;
 
+    tuple<ULL, ULL, bool> makeKey(ULL pos, ULL mask, bool playerTurn)
+    {
+        if (!playerTurn)
+            pos = pos ^ mask;
+        return {pos, mask, playerTurn};
+    }
     map<ULL, int> tt;
 
     int eval(ULL pos, ULL mask, bool playerTurn)
@@ -65,20 +71,13 @@ namespace
         {
             for (int vert = 0; vert + 3 < row; ++vert)
             {
-                int played = 0;
-                int opponent = 0;
-                for (int i = 0; i < 4; ++i)
-                {
-                    bool occupied = mask & (1ULL << (col * (row + 1) + vert + i));
-                    bool playerPiece = pos & (1ULL << (col * (row + 1) + vert + i));
-                    if (occupied)
-                    {
-                        if (playerPiece)
-                            played++;
-                        else
-                            opponent++;
-                    }
-                }
+                ULL windowMask = 1ULL << (col * (row + 1) + vert ) | 1ULL << (col * (row + 1) + vert + 1) | 1ULL << (col * (row + 1) + vert + 2) | 1ULL << (col * (row + 1) + vert + 3);
+                ULL occupied = mask & windowMask;
+                ULL playerPiece = pos & windowMask;
+                
+                auto played = __builtin_popcountll(playerPiece);
+                auto opponent = __builtin_popcountll(occupied) - played;
+
                 if (played && opponent)
                     continue; // Mixed window, no score
 
@@ -103,20 +102,13 @@ namespace
         {
             for (int hor = 0; hor <= column - 4; ++hor)
             {
-                int played = 0;
-                int opponent = 0;
-                for (int i = 0; i < 4; ++i)
-                {
-                    bool occupied = mask & (1ULL << ((hor + i) * (row + 1) + rowIdx));
-                    bool playerPiece = pos & (1ULL << ((hor + i) * (row + 1) + rowIdx));
-                    if (occupied)
-                    {
-                        if (playerPiece)
-                            played++;
-                        else
-                            opponent++;
-                    }
-                }
+                ULL windowMask = 1ULL << (hor * (row + 1) + rowIdx) | 1ULL << ((hor + 1) * (row + 1) + rowIdx) | 1ULL << ((hor + 2) * (row + 1) + rowIdx) | 1ULL << ((hor + 3) * (row + 1) + rowIdx);
+                ULL occupied = mask & windowMask;
+                ULL playerPiece = pos & windowMask;
+
+                auto played = __builtin_popcountll(playerPiece);
+                auto opponent = __builtin_popcountll(occupied) - played;
+                
                 if (played && opponent)
                     continue; // Mixed window, no score
                 if (played == 4)
@@ -140,22 +132,12 @@ namespace
         {
             for (int rowIdx = 0; rowIdx + 3 < row; rowIdx++)
             {
-                int played = 0;
-                int opponent = 0;
+                ULL windowMask = 1ULL << ((col + 0) * (row + 1) + rowIdx + 0) | 1ULL << ((col + 1) * (row + 1) + rowIdx + 1) | 1ULL << ((col + 2) * (row + 1) + rowIdx + 2) | 1ULL << ((col + 3) * (row + 1) + rowIdx + 3);
+                ULL occupied = mask & windowMask;
+                ULL playerPiece = pos & windowMask;
 
-                for (int i = 0; i < 4; i++)
-                {
-                    bool occupied = mask & (1ULL << ((col + i) * (row + 1) + rowIdx + i));
-                    bool playerPiece = pos & (1ULL << ((col + i) * (row + 1) + rowIdx + i));
-
-                    if (occupied)
-                    {
-                        if (playerPiece)
-                            played++;
-                        else
-                            opponent++;
-                    }
-                }
+                auto played = __builtin_popcountll(playerPiece);
+                auto opponent = __builtin_popcountll(occupied) - played;
 
                 if (played && opponent)
                     continue; // Mixed window, no score
@@ -179,28 +161,18 @@ namespace
         for (int col = 0; col + 3 < column; col++)
         {
             for (int rowIdx = row - 1; rowIdx >= 3; rowIdx--)
-            {
-                int played = 0;
-                int opponent = 0;
+            {   
+                ULL windowMask = 1ULL << ((col + 0) * (row + 1) + rowIdx - 0) | 1ULL << ((col + 1) * (row + 1) + rowIdx - 1) | 1ULL << ((col + 2) * (row + 1) + rowIdx - 2) | 1ULL << ((col + 3) * (row + 1) + rowIdx - 3);
+                ULL occupied = mask & windowMask;
+                ULL playerPiece = pos & windowMask;
 
-                for (int i = 0; i < 4; i++)
-                {
-                    bool occupied = mask & (1ULL << ((col + i) * (row + 1) + rowIdx - i));
-                    bool playerPiece = pos & (1ULL << ((col + i) * (row + 1) + rowIdx - i));
-
-                    if (occupied)
-                    {
-                        if (playerPiece)
-                            played++;
-                        else
-                            opponent++;
-                    }
-                }
+                auto played = __builtin_popcountll(playerPiece);
+                auto opponent = __builtin_popcountll(occupied) - played;
 
                 if (played && opponent)
                     continue; // Mixed window, no score
                 if (played == 4)
-                    eval = 1e9;
+                    return eval = 1e9;
                 else if (played == 3)
                     eval += 50;
                 else if (played == 2)
@@ -229,7 +201,7 @@ void initBottom()
     }
 }
 
-void clearTP()
+void clearTt()
 {
     tt.clear();
 }
@@ -343,12 +315,11 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
     }
 }
 
-std::pair<int,int> searchBestMove(unsigned long long pos, unsigned long long mask,bool turn, int maxDepth, int timeLimitMs){
-    abortado = false; nos =0; usaPrazo = false;
+std::pair<int,int> searchBestMove(unsigned long long pos, unsigned long long mask,bool turn, int maxDepth, int timeLimitMs){    
     auto inicio = chrono::steady_clock::now();
     auto move = minMax(pos, mask, 0, turn, INT_MIN, INT_MAX, -1);
-
     prazo = inicio + chrono::milliseconds(timeLimitMs);
+
     
     if(timeLimitMs > 0){ 
         usaPrazo = true;

@@ -38,13 +38,5 @@ bool gameIsOver(ULL pos, ULL mask, bool& tie){
     }
 
     // Check for tie
-    tie = true;
-    for(int col = 0; col < column; ++col) {
-        if(getTopInColumn(mask, col) < row) {
-            tie = false;
-            break;
-        }
-    }
-
-    return tie; 
+    return tie = __builtin_popcountll(mask) == column * row; 
 }   
