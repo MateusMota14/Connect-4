@@ -14,6 +14,7 @@ int main() {
     row = 6;
     initBottom();
     int depth = 5;
+    int timeLimitMs = 0; // 0 = sem limite de tempo, so profundidade
     ULL pos = 0, mask = 0;
     int lastMove = -1;
     bool turn = true; 
@@ -23,6 +24,10 @@ int main() {
         if (cmd == "depth") {
             cin >> depth;
             if (depth < 1) depth = 1;
+        }
+        else if (cmd == "time") {
+            cin >> timeLimitMs;
+            if (timeLimitMs < 0) timeLimitMs = 0;
         }
         else if (cmd == "new") {
             int starter;
@@ -34,7 +39,8 @@ int main() {
             clearTP();
 
             if (!turn) {
-                auto move = minMax(pos, mask, depth, turn, INT_MIN, INT_MAX);
+                int maxDepth = timeLimitMs > 0 ? column * row : depth;
+                auto move = searchBestMove(pos, mask, turn, maxDepth, timeLimitMs);
                 changeBoard(pos , mask, move.second, false, false);
                 lastMove = move.second;
                 turn = !turn;
@@ -52,7 +58,8 @@ int main() {
                 cout << "eval " << currentEval(pos, mask, true) << "\n" << flush;
                 cout<<"pos: "<< currentEval(pos, mask, true)<<"pos ^ mask: "<< currentEval(pos ^ mask, mask, true)<<"\n"<< flush;
 
-                auto move = minMax(pos ^ mask, mask, depth, turn, INT_MIN, INT_MAX);
+                int maxDepth = timeLimitMs > 0 ? column * row : depth;
+                auto move = searchBestMove(pos ^ mask, mask, turn, maxDepth, timeLimitMs);
                 changeBoard(pos, mask, move.second, false, false);
                 lastMove = move.second;
                 turn = true;

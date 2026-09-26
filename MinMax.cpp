@@ -1,6 +1,8 @@
 #include "MinMax.h"
 #include "Board.h"
+#include <chrono>
 #include <climits>
+#include <cstdlib>
 #include <map>
 
 using namespace std;
@@ -11,6 +13,11 @@ namespace
 {
     int cols[] = {3, 2, 4, 1, 5, 0, 6};
     ULL bottom = 0;
+    
+    chrono::steady_clock::time_point prazo;
+    bool usaPrazo = false;
+    bool abortado = false;
+    long long nos = 0;
 
     map<ULL, int> tt;
 
@@ -56,8 +63,7 @@ namespace
         // Vertical evaluation on windows of 4
         for (int col = 0; col < column; ++col)
         {
-            int top = getTopInColumn(mask, col);
-            for (int vert = 0; vert <= top - 3; ++vert)
+            for (int vert = 0; vert + 3 < row; ++vert)
             {
                 int played = 0;
                 int opponent = 0;
@@ -77,14 +83,14 @@ namespace
                     continue; // Mixed window, no score
 
                 if (played == 4)
-                    eval = 1e9;
+                    return eval = 1e9;
                 else if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
 
                 if (opponent == 4)
-                    eval = -1e9;
+                    return eval = -1e9;
                 else if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
@@ -114,14 +120,14 @@ namespace
                 if (played && opponent)
                     continue; // Mixed window, no score
                 if (played == 4)
-                    eval = 1e9;
+                    return eval = 1e9;
                 else if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
 
                 if (opponent == 4)
-                    eval = -1e9;
+                    return eval = -1e9;
                 else if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
@@ -154,14 +160,14 @@ namespace
                 if (played && opponent)
                     continue; // Mixed window, no score
                 if (played == 4)
-                    eval = 1e9;
+                    return eval = 1e9;
                 else if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
 
                 if (opponent == 4)
-                    eval = -1e9;
+                    return eval = -1e9;
                 else if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
@@ -201,7 +207,7 @@ namespace
                     eval += 5;
 
                 if (opponent == 4)
-                    eval = -1e9;
+                    return eval = -1e9;
                 else if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
@@ -212,7 +218,7 @@ namespace
         return eval;
     }
 
-} // namespace
+} //nasmesoace
 
 void initBottom()
 {
@@ -233,30 +239,40 @@ int currentEval(ULL pos, ULL mask, bool playerTurn)
     return eval(pos, mask, playerTurn);
 }
 
-pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, int beta)
+pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, int beta, int firstMove)
 {
-    bool tie;
+    if (usaPrazo && (++nos & 1023) == 0 && chrono::steady_clock::now() >= prazo)
+        abortado = true;
 
+    if (abortado)
+        return {0, -1};
+
+    bool tie;
     if (gameIsOver(pos ^ mask, mask, tie))
     {
         if (tie)
             return {0, 0};
         if (!playerTurn)
-            return {1e9 - depth, 0};
-        return {-1e9 + depth, 0};
+            return {1e9 + depth, 0};
+        return {-1e9 - depth, 0};
     }
+    int order[7] , n =0;
+    if (firstMove != -1) order[n++] = firstMove;
+
+    for (int c : cols)
+        if (c != firstMove) order[n++] = c;
 
     if (playerTurn)
     {
         int mx = INT_MIN;
         int mark = -1;
 
-        for (int col : cols)
+        for (int col : order)
         {
-            if (getTopInColumn(mask, col) == row)
+            if (getTopInColumn(mask, col) == row )
                 continue;
+            
             changeBoard(pos, mask, col, false, true);
-
             if(depth == 0){
                 auto temp = eval(pos, mask, playerTurn);
 
@@ -269,7 +285,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
             }
 
             else {
-                auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta);
+                auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, -1);
 
                 if (temp.first > mx){
                     mx = temp.first;
@@ -291,7 +307,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
         int mn = INT_MAX;
         int mark = -1;
 
-        for (int col : cols)
+        for (int col : order)
         {
             if (getTopInColumn(mask, col) == row)
                 continue;
@@ -308,7 +324,7 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
             }
 
             else {
-                auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta);
+                auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, -1);
                 if (temp.first < mn){
                     mn = temp.first;
                     mark = col;
@@ -325,4 +341,27 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
         }
         return {mn, mark};
     }
+}
+
+std::pair<int,int> searchBestMove(unsigned long long pos, unsigned long long mask,bool turn, int maxDepth, int timeLimitMs){
+    abortado = false; nos =0; usaPrazo = false;
+    auto inicio = chrono::steady_clock::now();
+    auto move = minMax(pos, mask, 0, turn, INT_MIN, INT_MAX, -1);
+
+    prazo = inicio + chrono::milliseconds(timeLimitMs);
+    
+    if(timeLimitMs > 0){ 
+        usaPrazo = true;
+    }
+
+    for(int depth = 1; depth <= maxDepth; depth++){
+        if (abs(move.first) >= 5e8) break; 
+        
+        auto result = minMax(pos, mask, depth, turn, INT_MIN, INT_MAX, move.second);
+        if(abortado) break;
+        move = result;
+    }
+    
+    abortado = false; nos =0; usaPrazo = false;
+    return move;
 }

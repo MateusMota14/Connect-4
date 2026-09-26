@@ -2,7 +2,12 @@
 #include <vector>
 #include <utility>
 
-std::pair<int,int> minMax(unsigned long long pos, unsigned long long mask, int depth, bool turn, int alfa, int beta);
+std::pair<int,int> minMax(unsigned long long pos, unsigned long long mask, int depth, bool turn, int alfa, int beta, int firstMove = -1);
+// Busca com iterative deepening, da profundidade 0 ate maxDepth, parando antes
+// se o tempo acabar ou se encontrar vitoria/derrota forcada. Devolve
+// {avaliacao, coluna} da ultima profundidade que terminou por completo.
+// timeLimitMs <= 0 significa sem limite de tempo (so profundidade).
+std::pair<int,int> searchBestMove(unsigned long long pos, unsigned long long mask,bool turn, int maxDepth, int timeLimitMs);
 
 // Deve ser chamada uma vez, depois que column/row forem definidos, e antes
 // de qualquer chamada a minMax/currentEval.

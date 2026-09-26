@@ -120,6 +120,11 @@ class Engine:
     def set_depth(self, depth):
         self.send(f"depth {depth}")
 
+    def set_time(self, ms):
+        """Limite de tempo por lance, em milissegundos. Quando > 0 o motor
+        busca por tempo (iterative deepening) e ignora a profundidade."""
+        self.send(f"time {ms}")
+
     def new_game(self, human_starts):
         self.send(f"new {1 if human_starts else 0}")
 
@@ -899,10 +904,15 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
         emit("error", f"Nao foi possivel gerar o grafico: {exc}")
 
 
+def _search_desc(depth, time_ms):
+    """Descricao curta do modo de busca de um lado: por tempo ou profundidade."""
+    return f"tempo {time_ms} ms" if time_ms else f"profundidade {depth}"
+
+
 def run_engine_vs_engine_match(exe_a, exe_b, depth_a=8, depth_b=8, games=1,
                                 on_event=None, engine_timeout=180,
                                 label_a="motor A", label_b="motor B",
-                                log_path=None, chart=None):
+                                log_path=None, chart=None, time_a=0, time_b=0):
     """Faz dois motores locais (exe_a e exe_b, dois processos conversando por
     stdin/stdout) jogarem um contra o outro, sem site nem navegador. A partida
     1 comeca com o lado A, a 2 com o lado B, e assim por diante alternando --
@@ -914,6 +924,8 @@ def run_engine_vs_engine_match(exe_a, exe_b, depth_a=8, depth_b=8, games=1,
       label_a/label_b: como cada lado aparece no terminal e nos eventos
       log_path: arquivo .jsonl onde cada partida e gravada
       chart: par (funcao_de_plot, caminho_do_png) gerado ao final
+      time_a/time_b: limite de tempo por lance em ms; quando > 0 aquele lado
+        busca por tempo em vez de profundidade (0 = so profundidade)
 
     on_event, se fornecido, recebe as mesmas tuplas de run_ludolab_match,
     trocando "ours"/"ludolab" por "a"/"b".
@@ -935,10 +947,15 @@ def run_engine_vs_engine_match(exe_a, exe_b, depth_a=8, depth_b=8, games=1,
         engine_b = Engine(exe_b)
         engine_a.set_depth(depth_a)
         engine_b.set_depth(depth_b)
+        # so envia "time" quando usado: builds antigos nao conhecem o comando
+        if time_a:
+            engine_a.set_time(time_a)
+        if time_b:
+            engine_b.set_time(time_b)
 
         print(f"\n=== Partida {game_no}/{games}: {label_a} ({os.path.basename(exe_a)}, "
-              f"profundidade {depth_a}) vs {label_b} ({os.path.basename(exe_b)}, "
-              f"profundidade {depth_b}) -- comeca: {nomes[starter]} ===")
+              f"{_search_desc(depth_a, time_a)}) vs {label_b} ({os.path.basename(exe_b)}, "
+              f"{_search_desc(depth_b, time_b)}) -- comeca: {nomes[starter]} ===")
         emit("new_game", game_no)
 
         # o lado que comeca e avisado via "new 0" (ele mesmo calcula e emite
@@ -997,6 +1014,8 @@ def run_engine_vs_engine_match(exe_a, exe_b, depth_a=8, depth_b=8, games=1,
             "engine_b": exe_b,
             "depth_a": depth_a,
             "depth_b": depth_b,
+            "time_a": time_a,
+            "time_b": time_b,
             "starter": starter,
             "moves": move_log,
             "result": resultado,
@@ -1326,6 +1345,16 @@ def main():
                               "equalizar builds com indexacao de profundidade diferente")
     parser.add_argument("--depth-b", type=int, default=None,
                          help="Profundidade do lado B (mesmas regras de --depth-a)")
+    parser.add_argument("--time", type=int, default=0,
+                         help="No --self-play, limite de tempo por lance em ms para os "
+                              "dois motores (padrao: 0 = busca por profundidade). "
+                              "Quando > 0, substitui a profundidade")
+    parser.add_argument("--time-a", type=int, default=None,
+                         help="Limite de tempo do lado A em ms (padrao: --time). Use 0 "
+                              "para esse lado jogar por profundidade -- ex.: "
+                              "--time-a 500 --time-b 0 --depth-b 8 poe tempo vs profundidade")
+    parser.add_argument("--time-b", type=int, default=None,
+                         help="Limite de tempo do lado B em ms (mesmas regras de --time-a)")
     parser.add_argument("--list-depthduel-games", action="store_true",
                          help="Lista as partidas ja salvas em games/depthduel_games.jsonl e sai")
     parser.add_argument("--list-selfplay-games", action="store_true",
@@ -1382,8 +1411,10 @@ def main():
         nomes = {"a": "motor A venceu", "b": "motor B venceu", "empate": "empate"}
         for i, r in enumerate(records, start=1):
             print(f"{i:3d}. {r.get('timestamp', '?')}  "
-                  f"A={os.path.basename(r.get('engine_a', '?'))}(d={r.get('depth_a', '?')})  "
-                  f"B={os.path.basename(r.get('engine_b', '?'))}(d={r.get('depth_b', '?')})  "
+                  f"A={os.path.basename(r.get('engine_a', '?'))}"
+                  f"({'t=' + str(r['time_a']) + 'ms' if r.get('time_a') else 'd=' + str(r.get('depth_a', '?'))})  "
+                  f"B={os.path.basename(r.get('engine_b', '?'))}"
+                  f"({'t=' + str(r['time_b']) + 'ms' if r.get('time_b') else 'd=' + str(r.get('depth_b', '?'))})  "
                   f"comecou={r.get('starter', '?').upper()}  "
                   f"lances={len(r.get('moves', []))}  resultado: {nomes.get(r.get('result'), '?')}")
         return
@@ -1506,14 +1537,18 @@ def main():
         # depth == 0, onde o mesmo numero significa um ply a mais).
         depth_a = args.depth_a if args.depth_a is not None else args.depth
         depth_b = args.depth_b if args.depth_b is not None else args.depth
+        time_a = max(0, args.time_a if args.time_a is not None else args.time)
+        time_b = max(0, args.time_b if args.time_b is not None else args.time)
+        desc_a = _search_desc(depth_a, time_a)
+        desc_b = _search_desc(depth_b, time_b)
 
-        if os.path.abspath(exe_a) == os.path.abspath(exe_b) and depth_a == depth_b:
+        if os.path.abspath(exe_a) == os.path.abspath(exe_b) and desc_a == desc_b:
             print(
                 "--self-play compara dois lados diferentes, mas --engine-a e "
-                f"--engine-b apontam para o mesmo arquivo ({exe_a}) na mesma "
-                f"profundidade ({depth_a}); os dois lados jogariam identico.\n"
-                "Aponte um segundo build com --engine-b, ou use profundidades "
-                "diferentes com --depth-a/--depth-b (ou --depth-duel)."
+                f"--engine-b apontam para o mesmo arquivo ({exe_a}) com a mesma "
+                f"busca ({desc_a}); os dois lados jogariam identico.\n"
+                "Aponte um segundo build com --engine-b, ou diferencie os lados "
+                "com --depth-a/--depth-b ou --time-a/--time-b."
             )
             return
 
@@ -1521,12 +1556,13 @@ def main():
             return run_engine_vs_engine_match(
                 exe_a, exe_b, depth_a=depth_a, depth_b=depth_b,
                 games=args.games, on_event=on_event,
-                engine_timeout=args.engine_timeout)
+                engine_timeout=args.engine_timeout,
+                time_a=time_a, time_b=time_b)
 
         if args.watch:
             root = tk.Tk()
-            legenda = (f"Amarelo = motor A ({os.path.basename(exe_a)})   "
-                       f"Vermelho = motor B ({os.path.basename(exe_b)})")
+            legenda = (f"Amarelo = motor A ({os.path.basename(exe_a)}, {desc_a})   "
+                       f"Vermelho = motor B ({os.path.basename(exe_b)}, {desc_b})")
             EngineMatchWatchGUI(root, "Connect 4 - motor A vs motor B (self-play)",
                                  legenda, "motor A", "motor B", args.games, runner)
             root.mainloop()
