@@ -37,11 +37,13 @@ Requires g++ (on Windows, MSYS2/MinGW).
 
 ```bash
 # Linux / macOS
-g++ -O2 -o output/mIniMax main.cpp Board.cpp MinMax.cpp
+g++ -O2 -mpopcnt -o output/mIniMax main.cpp Board.cpp MinMax.cpp
 
 # Windows (MSYS2 / MinGW)
-g++ -O2 -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp
+g++ -O2 -mpopcnt -o output/mIniMax.exe main.cpp Board.cpp MinMax.cpp
 ```
+
+`-mpopcnt` matters: the evaluation counts pieces with `__builtin_popcountll`, and without this flag g++ replaces it with a slower software routine — the search runs about 1.6× slower. Any x86-64 CPU from the last ~15 years supports it. `-march=native` also works, but the resulting binary may not run on other machines.
 
 The interface looks for `output/mIniMax.exe` or `output/mIniMax` by default. Any other build can be passed with `--engine`, `--engine-a` or `--engine-b`.
 
