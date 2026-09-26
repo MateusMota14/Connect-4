@@ -37,33 +37,24 @@ namespace
 
         for (int col = 0; col < column; ++col)
         {
-            int top = getTopInColumn(mask, col);
+            ULL columnMask = 1ULL << (col * (row + 1) ) |
+            1ULL << (col * (row + 1) + 1) |
+            1ULL << (col * (row + 1) + 2) |
+            1ULL << (col * (row + 1) + 3) |
+            1ULL << (col * (row + 1) + 4) |
+            1ULL << (col * (row + 1) + 5) ;
 
-            for (int vert = 0; vert <= top; vert++)
-            {
-                if (pos & (1ULL << (col * (row + 1) + vert)))
-                {
-                    if (col == 0 || col == column - 1)
-                        eval += 1;
-                    else if (col == 1 || col == column - 2)
-                        eval += 2;
-                    else if (col == 2 || col == column - 3)
-                        eval += 3;
-                    else
-                        eval += 5;
-                }
-                else if (mask & (1ULL << (col * (row + 1) + vert)))
-                {
-                    if (col == 0 || col == column - 1)
-                        eval -= 1;
-                    else if (col == 1 || col == column - 2)
-                        eval -= 2;
-                    else if (col == 2 || col == column - 3)
-                        eval -= 3;
-                    else
-                        eval -= 5;
-                }
-            }
+            int diff = 2 * __builtin_popcountll(pos & columnMask) - __builtin_popcountll(mask & columnMask);//quantity of pieces by player - opponent in column
+            if (diff == 0) continue;
+            
+            if (col == 0 || col == column - 1)
+                eval += diff;
+            else if (col == 1 || col == column - 2)
+                eval += 2 * diff;
+            else if (col == 2 || col == column - 3)
+                eval += 3 *diff;
+            else
+                eval += 5 * diff;
         }
 
         // Vertical evaluation on windows of 4

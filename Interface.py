@@ -732,7 +732,8 @@ def _flip_side(side):
 
 
 def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
-                       headless=True, games=1, on_event=None, engine_timeout=180):
+                       headless=True, games=1, on_event=None, engine_timeout=180,
+                       time_ms=0):
     """on_event, se fornecido, e chamado com tuplas:
       ("new_game", numero_da_partida)
       ("move", coluna, "ours" | "ludolab")
@@ -777,6 +778,9 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
 
             engine = Engine(exe_path)
             engine.set_depth(depth)
+            # so envia "time" quando usado: builds antigos nao conhecem o comando
+            if time_ms:
+                engine.set_time(time_ms)
 
             def next_eval():
                 # o motor sempre imprime a avaliacao do ponto de vista de
@@ -787,7 +791,7 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
                 valor = _read_engine_eval(engine)
                 return None if valor is None else -valor
 
-            print(f"\n=== Partida {game_no}/{games}: nosso motor (profundidade {depth}) "
+            print(f"\n=== Partida {game_no}/{games}: nosso motor ({_search_desc(depth, time_ms)}) "
                   f"como {'primeiro' if current_side == 'player1' else 'segundo'} "
                   f"vs ludolab AI Level {ai_level} ===")
             emit("new_game", game_no)
@@ -882,6 +886,7 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "engine": exe_path,
                 "depth": depth,
+                "time_ms": time_ms,
                 "ai_level": ai_level,
                 "our_side": current_side,
                 "moves": move_log,
@@ -1070,7 +1075,8 @@ class LudolabWatchGUI:
     nosso motor contra a IA de ludolab.net (run_ludolab_match rodando numa
     thread separada, sem nenhuma interacao manual)."""
 
-    def __init__(self, root, exe_path, depth, ai_level, our_side, games, engine_timeout=180):
+    def __init__(self, root, exe_path, depth, ai_level, our_side, games, engine_timeout=180,
+                 time_ms=0):
         self.root = root
         self.root.title("Connect 4 - nosso motor vs ludolab.net")
         self.root.configure(bg=COLOR_BG)
@@ -1101,14 +1107,15 @@ class LudolabWatchGUI:
 
         self._draw_board()
         threading.Thread(target=self._run,
-                          args=(exe_path, depth, ai_level, our_side, games, engine_timeout),
+                          args=(exe_path, depth, ai_level, our_side, games, engine_timeout,
+                                time_ms),
                           daemon=True).start()
         self.root.after(100, self._poll)
 
-    def _run(self, exe_path, depth, ai_level, our_side, games, engine_timeout):
+    def _run(self, exe_path, depth, ai_level, our_side, games, engine_timeout, time_ms):
         run_ludolab_match(exe_path, depth=depth, ai_level=ai_level, our_side=our_side,
                            headless=True, games=games, on_event=self.events.put,
-                           engine_timeout=engine_timeout)
+                           engine_timeout=engine_timeout, time_ms=time_ms)
 
     def _draw_board(self):
         _draw_two_color_board(self.canvas, self.board)
@@ -1346,8 +1353,9 @@ def main():
     parser.add_argument("--depth-b", type=int, default=None,
                          help="Profundidade do lado B (mesmas regras de --depth-a)")
     parser.add_argument("--time", type=int, default=0,
-                         help="No --self-play, limite de tempo por lance em ms para os "
-                              "dois motores (padrao: 0 = busca por profundidade). "
+                         help="Limite de tempo por lance em ms (padrao: 0 = busca por "
+                              "profundidade). No --ludolab vale para o nosso motor; no "
+                              "--self-play, para os dois lados. "
                               "Quando > 0, substitui a profundidade")
     parser.add_argument("--time-a", type=int, default=None,
                          help="Limite de tempo do lado A em ms (padrao: --time). Use 0 "
@@ -1429,7 +1437,8 @@ def main():
             lado = "primeiro" if r.get("our_side") == "player1" else "segundo"
             # partidas antigas nao registravam o executavel usado
             motor = os.path.basename(r["engine"]) if r.get("engine") else "?"
-            print(f"{i:3d}. {r.get('timestamp', '?')}  {motor}  depth={r.get('depth', '?')}  "
+            print(f"{i:3d}. {r.get('timestamp', '?')}  {motor}  "
+                  f"{'time=' + str(r['time_ms']) + 'ms' if r.get('time_ms') else 'depth=' + str(r.get('depth', '?'))}  "
                   f"ai_level={r.get('ai_level', '?')}  nosso motor jogou {lado}  "
                   f"lances={len(r.get('moves', []))}  resultado: {nomes.get(r.get('result'), '?')}")
         return
@@ -1583,12 +1592,14 @@ def main():
             root = tk.Tk()
             LudolabWatchGUI(root, exe_path, depth=args.depth, ai_level=args.ai_level,
                              our_side=our_side, games=args.games,
-                             engine_timeout=args.engine_timeout)
+                             engine_timeout=args.engine_timeout,
+                             time_ms=max(0, args.time))
             root.mainloop()
         else:
             run_ludolab_match(exe_path, depth=args.depth, ai_level=args.ai_level,
                                our_side=our_side, headless=not args.show_browser,
-                               games=args.games, engine_timeout=args.engine_timeout)
+                               games=args.games, engine_timeout=args.engine_timeout,
+                               time_ms=max(0, args.time))
         return
 
     root = tk.Tk()
