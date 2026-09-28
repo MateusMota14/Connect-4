@@ -3,7 +3,8 @@
 #include <chrono>
 #include <climits>
 #include <cstdlib>
-#include <unordered_map>
+#include <cstring>
+#include <cassert>
 
 using namespace std;
 
@@ -23,12 +24,18 @@ namespace
     enum { EXACT = 0, UPPER = 1, LOWER = 2 };
 
     struct Entry {
+        ULL key;
         int eval;       // valor que a busca devolveu
         int depth;      // profundidade RESTANTE com que o no foi buscado
         int bestMove;
         int flag;       // EXACT, UPPER (valor <= eval) ou LOWER (valor >= eval)
     };
-    unordered_map<ULL, Entry> tt;
+    
+    constexpr int TT_BITS = 22;
+    constexpr int TT_size = 1 << TT_BITS;
+    Entry tt[TT_size];
+
+    inline int indice(ULL key) { return (key * 0x9E3779B97F4A7C15ULL) >> (64 - TT_BITS); }
 
     int eval(ULL pos, ULL mask, bool playerTurn)
     {
@@ -75,16 +82,12 @@ namespace
                 if (played && opponent)
                     continue; // Mixed window, no score
 
-                if (played == 4)
-                    return eval = 1e9;
-                else if (played == 3)
+                if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
-
-                if (opponent == 4)
-                    return eval = -1e9;
-                else if (opponent == 3)
+                
+                if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
                     eval -= 5;
@@ -105,16 +108,12 @@ namespace
                 
                 if (played && opponent)
                     continue; // Mixed window, no score
-                if (played == 4)
-                    return eval = 1e9;
-                else if (played == 3)
+                if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
 
-                if (opponent == 4)
-                    return eval = -1e9;
-                else if (opponent == 3)
+                if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
                     eval -= 5;
@@ -135,16 +134,13 @@ namespace
 
                 if (played && opponent)
                     continue; // Mixed window, no score
-                if (played == 4)
-                    return eval = 1e9;
-                else if (played == 3)
+                
+                if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
 
-                if (opponent == 4)
-                    return eval = -1e9;
-                else if (opponent == 3)
+                if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
                     eval -= 5;
@@ -165,16 +161,13 @@ namespace
 
                 if (played && opponent)
                     continue; // Mixed window, no score
-                if (played == 4)
-                    return eval = 1e9;
-                else if (played == 3)
+                
+                if (played == 3)
                     eval += 50;
                 else if (played == 2)
                     eval += 5;
-
-                if (opponent == 4)
-                    return eval = -1e9;
-                else if (opponent == 3)
+                
+                if (opponent == 3)
                     eval -= 50;
                 else if (opponent == 2)
                     eval -= 5;
@@ -197,8 +190,16 @@ void initBottom()
 
 void clearTt()
 {
-    tt.clear();
-    for (ULL t : {0ULL, 1ULL << 63}) tt[bottom | t] = {0, 100, 3, EXACT};
+    memset(tt, 0, sizeof(tt));
+    
+    int idx1, idx2;
+
+    assert(bottom != 0);   // initBottom() precisa ter rodado antes
+
+    idx1 = indice(bottom);
+    idx2 = indice(bottom | 1ULL << 63 );
+    tt[idx1] = {bottom, 0, 100, 3, EXACT};
+    tt[idx2] = {bottom | 1ULL << 63 , 0, 100, 3, EXACT};
 }
 
 int currentEval(ULL pos, ULL mask, bool playerTurn)
@@ -206,7 +207,7 @@ int currentEval(ULL pos, ULL mask, bool playerTurn)
     return eval(pos, mask, playerTurn);
 }
 
-pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, int beta, int firstMove)
+pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, int beta, int ply)
 {
     if (usaPrazo && (++nos & 1023) == 0 && chrono::steady_clock::now() >= prazo)
         abortado = true;
@@ -220,26 +221,31 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
         if (tie)
             return {0, 0};
         if (!playerTurn)
-        return {1e9 + depth, 0};
-    return {-1e9 - depth, 0};
+        return {1e9 - ply, 0};
+    return {-1e9 +ply, 0};
     }
 
-    ULL key = ((playerTurn ? pos : pos ^ mask) + mask + bottom) | ((ULL)playerTurn << 63);
-    auto it = tt.find(key);
+    if(depth == 0){
+        return {eval(pos, mask, playerTurn), -1};
+    }
     
-    if (it != tt.end()){
-        auto cachedDepth = it->second.depth;
-        firstMove = it->second.bestMove;
+    ULL key = ((playerTurn ? pos : pos ^ mask) + mask + bottom) | ((ULL)playerTurn << 63);
+    int idx = indice(key);
 
+    auto it = tt[idx];
+    int firstMove = -1;
+
+    if (it.key == key){
+        auto cachedDepth = it.depth;
+        firstMove = it.bestMove;
+
+        int v = it.eval;
+        if (v > 5e8) v -= ply; else if (v < -5e8) v += ply;
         if (cachedDepth >= depth){
-            if (it->second.flag == 0)
-                return {it->second.eval, firstMove};
-            else if (it->second.flag == 2)
-                alfa = max(alfa, it->second.eval);
-            else if (it->second.flag == 1)
-                beta = min(beta, it->second.eval);
-            if (alfa >= beta)
-                return {it->second.eval, firstMove};
+            if (it.flag == 0) return {v, firstMove};
+            else if (it.flag == 2) alfa = max(alfa, v);
+            else if (it.flag == 1) beta = min(beta, v);
+            if (alfa >= beta) return {v, firstMove};
         }
     }
     int flag, alfa0 =alfa, beta0 = beta;
@@ -261,27 +267,15 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
                 continue;
             
             changeBoard(pos, mask, col, false, true);
-            if(depth == 0){
-                auto temp = eval(pos, mask, playerTurn);
 
-                if (temp > mx){
-                    mx = temp;
-                    move = col;
-                }
+            auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, ply +1);
 
-                alfa = max(alfa, temp);
+            if (temp.first > mx){
+                mx = temp.first;
+                move = col;
             }
 
-            else {
-                auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, -1);
-
-                if (temp.first > mx){
-                    mx = temp.first;
-                    move = col;
-                }
-
-                alfa = max(alfa, temp.first);
-            }
+            alfa = max(alfa, temp.first);
 
             changeBoard(pos, mask, col, true, true);
 
@@ -291,61 +285,51 @@ pair<int, int> minMax(ULL pos, ULL mask, int depth, bool playerTurn, int alfa, i
         
         if(mx > alfa0 && mx < beta0) flag =0;
         else if (mx <= alfa0) flag =1;
-        else if (mx >= beta0) flag =2;
+        else flag =2;
 
-        if(!abortado) tt[key] = {mx, depth, move, flag};
+        int vt = mx;
+        if (vt > 5e8) vt += ply; else if (vt < -5e8) vt -= ply;
+        if(!abortado) tt[idx] = {key,vt, depth, move, flag};
         return {mx, move};
     }
-    else
+
+    int mn = INT_MAX;
+    int move = -1;
+
+    for (int col : order)
     {
-        int mn = INT_MAX;
-        int move = -1;
+        if (getTopInColumn(mask, col) == row)
+            continue;
+        changeBoard(pos, mask, col, false, true);
 
-        for (int col : order)
-        {
-            if (getTopInColumn(mask, col) == row)
-                continue;
-            changeBoard(pos, mask, col, false, true);
-
-            if(depth == 0){
-                auto temp = eval(pos, mask, playerTurn);
-                if (temp < mn){
-                    mn = temp;
-                    move = col;
-                }
-
-                beta = min(beta, temp);
-            }
-
-            else {
-                auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, -1);
-                if (temp.first < mn){
-                    mn = temp.first;
-                    move = col;
-                }
-
-                beta = min(beta, temp.first);
-
-            }
-
-            changeBoard(pos, mask, col, true, true);
-
-            if (alfa >= beta)
-                break;
+        auto temp = minMax(pos ^ mask, mask, depth - 1, !playerTurn, alfa, beta, ply +1);
+        if (temp.first < mn){
+            mn = temp.first;
+            move = col;
         }
 
-        if(mn > alfa0 && mn < beta0) flag =0;
-        else if (mn <= alfa0) flag =1;
-        else if (mn >= beta0) flag =2;
+        beta = min(beta, temp.first);
+        changeBoard(pos, mask, col, true, true);
 
-        if(!abortado) tt[key] = {mn, depth, move, flag};
-        return {mn, move};
+        if (alfa >= beta)
+            break;
     }
+        
+
+    if(mn > alfa0 && mn < beta0) flag =0;
+    else if (mn <= alfa0) flag =1;
+    else flag =2;
+
+    
+    int vt = mn;
+    if (vt > 5e8) vt += ply; else if (vt < -5e8) vt -= ply;
+    if(!abortado) tt[idx] = {key,vt, depth, move, flag};
+    return {mn, move};
 }
 
 std::pair<int,int> searchBestMove(unsigned long long pos, unsigned long long mask,bool turn, int maxDepth, int timeLimitMs){    
     auto inicio = chrono::steady_clock::now();
-    auto move = minMax(pos, mask, 0, turn, INT_MIN, INT_MAX, -1);
+    auto move = minMax(pos, mask, 1, turn, INT_MIN, INT_MAX, 0);
     prazo = inicio + chrono::milliseconds(timeLimitMs);
 
     
@@ -353,10 +337,10 @@ std::pair<int,int> searchBestMove(unsigned long long pos, unsigned long long mas
         usaPrazo = true;
     }
 
-    for(int depth = 1; depth <= maxDepth; depth++){
+    for(int depth = 2; depth <= maxDepth; depth++){
         if (abs(move.first) >= 5e8) break; 
         
-        auto result = minMax(pos, mask, depth, turn, INT_MIN, INT_MAX, move.second);
+        auto result = minMax(pos, mask, depth, turn, INT_MIN, INT_MAX, 0);
         if(abortado) break;
         move = result;
     }

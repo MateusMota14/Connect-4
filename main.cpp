@@ -68,6 +68,33 @@ int main() {
             }
             assert((currentEval(pos, mask, true) == -currentEval(pos ^ mask, mask, true)) && "Erro: A avaliacao de pos e pos^mask nao bateu!");
         }
+        else if (cmd == "board") {
+            // Posicao avulsa, sem historico: "board <42 caracteres>", linha a linha
+            // de cima para baixo, '0' = vazia, '1' = peca do motor (quem joga agora),
+            // '2' = peca do adversario. Responde "move <col>" e nao altera a partida
+            // acompanhada por new/play.
+            string cells;
+            cin >> cells;
+            if ((int)cells.size() != column * row) {
+                cout << "error board precisa de " << column * row << " casas\n" << flush;
+                continue;
+            }
+            ULL mine = 0, all = 0;
+            for (int r = 0; r < row; ++r)
+                for (int c = 0; c < column; ++c) {
+                    char ch = cells[r * column + c];
+                    ULL bit = 1ULL << (c * (row + 1) + (row - 1 - r));
+                    if (ch == '1') { mine |= bit; all |= bit; }
+                    else if (ch == '2') all |= bit;
+                }
+            // 0 ou 1 peca = inicio de uma partida nova: limpa a tabela de
+            // transposicao, como o "new" faz (senao ela cresce sem limite)
+            if (__builtin_popcountll(all) <= 1)
+                clearTt();
+            int maxDepth = timeLimitMs > 0 ? column * row : depth;
+            auto move = searchBestMove(mine, all, false, maxDepth, timeLimitMs);
+            cout << "move " << move.second << "\n" << flush;
+        }
         else if (cmd == "quit") {
             break;
         }
