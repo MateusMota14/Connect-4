@@ -138,14 +138,14 @@ The duel mode is the most reliable for a strong engine: the leaderboard mode sta
 
 ### Results
 
-Duel mode, 100 games against each of the two strongest bots, 100 ms per move:
+Duel mode at 100 ms per move, 5 runs with different seeds (1000 games per build, 500 against each bot):
 
-| build | vs SelfTrained6 (2410) | vs SelfTrained7 (2573) | Elo |
+| build | vs SelfTrained6 (2410) | vs SelfTrained7 (2573) | Elo (95% interval) |
 |---|---|---|---|
-| `ttcentro` (hash-map transposition table) | 80.0% | 53.5% | 2619 |
-| `ttfixa` (fixed-size table, ply-based mate scores) | 62.0% | 54.0% | 2551 |
+| `ttcentro` (hash-map transposition table) | 69.3% | 49.5% | 2561 (2540–2583) |
+| `ttfixa` (fixed-size table, ply-based mate scores) | 65.8% | 49.7% | 2549 (2528–2570) |
 
-Each figure has a margin of roughly ±50 Elo, so the two builds are not distinguishable yet. Around 2600 the engine is already at the top of this scale, where it has little room left to measure.
+The two builds are statistically tied, as expected: they choose the same moves at the same depth, and the fixed-size table only makes the search ~12% faster and keeps memory constant. A single run of 200 games varied by up to ±100 Elo between seeds, so repeat runs before comparing builds. Around 2550–2600 the engine is at the top of this scale, level with the strongest bot.
 
 Run parallel duels with care at longer time limits: with 8 workers and 1 s per move (16 processes on 12 cores), the results dropped by ~250 Elo compared with 2 workers.
 
