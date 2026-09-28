@@ -19,6 +19,7 @@ Dois modos:
 
 import argparse
 import math
+import random
 import multiprocessing as mp
 import subprocess
 
@@ -33,13 +34,20 @@ class EnginePlayer(Player):
     "board <42 casas>", porque o ambiente entrega o tabuleiro inteiro (e nao
     o historico de lances). O motor fica aberto entre os lances."""
 
-    def __init__(self, exe_path, depth=8, time_ms=0, name="NossoMotor"):
+    def __init__(self, exe_path, depth=8, time_ms=0, name="NossoMotor", tt_reuse=True,
+                 random_opening=0, seed=0):
         self.name = name
+        # abertura aleatoria: os primeiros N lances do motor em cada partida sao
+        # sorteados entre as colunas 1 a 5, para as partidas nao se repetirem
+        self.random_opening = random_opening
+        self.rng = random.Random(seed)
         self.process = subprocess.Popen([exe_path], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, text=True, bufsize=1)
         self._send(f"depth {depth}")
         if time_ms:
             self._send(f"time {time_ms}")
+        if not tt_reuse:
+            self._send("ttkeep 0")   # limpa a tabela de transposicao antes de cada busca
 
     def _send(self, cmd):
         self.process.stdin.write(cmd + "\n")
@@ -53,6 +61,15 @@ class EnginePlayer(Player):
                        for v in np.asarray(obs).reshape(-1))
 
     def _play_single(self, obs):
+        obs = np.asarray(obs)
+        mine = int(np.sum(obs == 1))
+        if np.sum(obs != 0) <= 1:
+            # partida nova: "new" limpa a tabela de transposicao do motor
+            self._send("new 1")
+        if mine < self.random_opening:
+            livres = [c for c in range(1, 6) if obs[0, c] == 0]
+            if livres:
+                return self.rng.choice(livres)
         self._send("board " + self._to_board_string(obs))
         while True:
             line = self.process.stdout.readline()
@@ -130,13 +147,14 @@ DUEL_OPPONENTS = ["SelfTrained6Player", "SelfTrained7Player"]
 
 def _duel_worker(task):
     """Roda num processo separado: um motor e um adversario proprios."""
-    exe, depth, time_ms, opp_name, games, seed = task
+    exe, depth, time_ms, opp_name, games, seed, tt_reuse, random_opening = task
     import torch
     import connect_four_gymnasium.players as players
     torch.set_num_threads(1)
     np.random.seed(seed)
     opponent = getattr(players, opp_name)()
-    player = EnginePlayer(exe, depth=depth, time_ms=time_ms)
+    player = EnginePlayer(exe, depth=depth, time_ms=time_ms, tt_reuse=tt_reuse,
+                          random_opening=random_opening, seed=seed)
     env = ConnectFourEnv(opponent=opponent)
     placar = {1: 0, 0: 0, -1: 0}
     try:
@@ -166,7 +184,7 @@ def _performance_elo(results, elos):
     return (lo + hi) / 2
 
 
-def run_duel(exe, depth, time_ms, games, workers, seed=0):
+def run_duel(exe, depth, time_ms, games, workers, seed=0, tt_reuse=True, random_opening=0):
     import connect_four_gymnasium.players as players
     elos = {name: getattr(players, name)().getElo() for name in DUEL_OPPONENTS}
     # divide as partidas de cada adversario entre os processos
@@ -177,7 +195,7 @@ def run_duel(exe, depth, time_ms, games, workers, seed=0):
         for i in range(per):
             n = base + (1 if i < extra else 0)
             if n:
-                tasks.append((exe, depth, time_ms, name, n, seed))
+                tasks.append((exe, depth, time_ms, name, n, seed, tt_reuse, random_opening))
                 seed += 1
     results = {name: {1: 0, 0: 0, -1: 0} for name in DUEL_OPPONENTS}
     with mp.get_context("spawn").Pool(len(tasks)) as pool:
@@ -210,6 +228,12 @@ def main():
                              "e N contra o SelfTrained7, em paralelo e sem janela")
     parser.add_argument("--workers", type=int, default=8,
                         help="processos em paralelo no --duel (padrao: 8)")
+    parser.add_argument("--no-tt-reuse", action="store_true",
+                        help="limpa a tabela de transposicao do motor antes de cada lance "
+                             "(precisa de um motor com o comando ttkeep)")
+    parser.add_argument("--random-opening", type=int, default=0, metavar="N",
+                        help="os primeiros N lances do motor em cada partida sao sorteados "
+                             "(colunas 1 a 5), para variar as partidas (padrao: 0)")
     parser.add_argument("--seed", type=int, default=0,
                         help="semente inicial do --duel; use valores diferentes para que rodadas "
                              "repetidas tenham partidas diferentes (padrao: 0)")
@@ -220,14 +244,17 @@ def main():
     if args.duel:
         print(f"Duelo de {args.engine} ({busca}): {args.duel} partidas contra cada um de "
               f"{', '.join(DUEL_OPPONENTS)}...")
-        elo = run_duel(args.engine, args.depth, args.time, args.duel, args.workers, args.seed)
+        elo = run_duel(args.engine, args.depth, args.time, args.duel, args.workers, args.seed,
+                       tt_reuse=not args.no_tt_reuse, random_opening=args.random_opening)
         if elo is None:
             print("Elo fora da escala (0% ou 100% dos pontos).")
         else:
             print(f"Elo na escala do Connect-4-env: {elo:.0f}")
         return
 
-    player = EnginePlayer(args.engine, depth=args.depth, time_ms=args.time)
+    player = EnginePlayer(args.engine, depth=args.depth, time_ms=args.time,
+                          tt_reuse=not args.no_tt_reuse, random_opening=args.random_opening,
+                          seed=args.seed)
     try:
         print(f"Calculando o Elo de {args.engine} ({busca}), {args.matches} rodadas...")
         board = WatchedEloLeaderboard() if args.watch else EloLeaderboard()

@@ -130,24 +130,27 @@ python elo_c4env.py --engine output/mIniMax --time 100 --matches 100
 # same, showing each game in a window
 python elo_c4env.py --engine output/mIniMax --time 1000 --matches 50 --watch
 
-# direct duel against the two strongest bots (SelfTrained6 and SelfTrained7), in parallel
-python elo_c4env.py --engine output/mIniMax --time 1000 --duel 100 --workers 8
+# direct duel against the two strongest bots (SelfTrained6 and SelfTrained7), in parallel,
+# with the first 2 engine moves of each game drawn at random
+python elo_c4env.py --engine output/mIniMax --time 1000 --duel 100 --workers 4 --random-opening 2 --seed 1
 ```
 
 The duel mode is the most reliable for a strong engine: the leaderboard mode starts at 1400 and climbs slowly, so with few rounds it may never reach the strongest bots. The engine talks to the environment through the `board` protocol command (a full position, since the environment does not send move history).
 
+**Always use `--random-opening` when comparing builds or settings.** The engine is deterministic and the neural bots usually pick the same move, so without it the same few games repeat: at depth 12, one single game made up almost a third of the games against `SelfTrained6`. The score then depends on whether the engine wins those particular games, and results jump by 100–250 Elo between settings for no real reason. With `--random-opening 2`, 56–59 out of 60 games are distinct. Also repeat runs with different `--seed` values and keep the number of workers below the number of CPU cores, since time-limited searches slow down when processes compete for the CPU.
+
 ### Results
 
-Duel mode at 100 ms per move, 5 runs with different seeds (1000 games per build, 500 against each bot):
+Duel mode with `--random-opening 2`, `ttfixa` build, 400 games per setting (200 against each bot), 4 workers on 12 cores:
 
-| build | vs SelfTrained6 (2410) | vs SelfTrained7 (2573) | Elo (95% interval) |
+| setting | vs SelfTrained6 (2410) | vs SelfTrained7 (2573) | Elo (95% interval) |
 |---|---|---|---|
-| `ttcentro` (hash-map transposition table) | 69.3% | 49.5% | 2561 (2540–2583) |
-| `ttfixa` (fixed-size table, ply-based mate scores) | 65.8% | 49.7% | 2549 (2528–2570) |
+| time, 1 s per move | 48.0% | 38.5% | 2442 (2409–2474) |
+| fixed depth 10 | 37.8% | 38.2% | 2402 (2368–2434) |
+| time, 100 ms per move | 39.0% | 35.8% | 2397 (2362–2430) |
+| fixed depth 14 | 40.8% | 28.8% | 2376 (2340–2410) |
 
-The two builds are statistically tied, as expected: they choose the same moves at the same depth, and the fixed-size table only makes the search ~12% faster and keeps memory constant. A single run of 200 games varied by up to ±100 Elo between seeds, so repeat runs before comparing builds. Around 2550–2600 the engine is at the top of this scale, level with the strongest bot.
-
-Run parallel duels with care at longer time limits: with 8 workers and 1 s per move (16 processes on 12 cores), the results dropped by ~250 Elo compared with 2 workers.
+The random openings lower the absolute Elo (the drawn moves are sometimes weak and the bots punish them), so these numbers are for comparing settings with each other. Against these bots the differences between settings are small; for finer comparisons between engine versions, a match against the engine itself from random openings is more sensitive (there, 1 s per move scored 70% against 100 ms).
 
 ## Engine protocol
 

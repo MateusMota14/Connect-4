@@ -15,6 +15,7 @@ int main() {
     initBottom();
     int depth = 5;
     int timeLimitMs = 0; // 0 = sem limite de tempo, so profundidade
+    bool ttKeep = true;  // false = limpa a tabela de transposicao antes de cada busca
     ULL pos = 0, mask = 0;
     int lastMove = -1;
     bool turn = true; 
@@ -24,6 +25,11 @@ int main() {
         if (cmd == "depth") {
             cin >> depth;
             if (depth < 1) depth = 1;
+        }
+        else if (cmd == "ttkeep") {
+            int v;
+            cin >> v;
+            ttKeep = (v != 0);
         }
         else if (cmd == "time") {
             cin >> timeLimitMs;
@@ -40,6 +46,7 @@ int main() {
 
             if (!turn) {
                 int maxDepth = timeLimitMs > 0 ? column * row : depth;
+                if (!ttKeep) clearTt();
                 auto move = searchBestMove(pos, mask, turn, maxDepth, timeLimitMs);
                 changeBoard(pos , mask, move.second, false, false);
                 lastMove = move.second;
@@ -59,6 +66,7 @@ int main() {
                 cout<<"pos: "<< currentEval(pos, mask, true)<<"pos ^ mask: "<< currentEval(pos ^ mask, mask, true)<<"\n"<< flush;
 
                 int maxDepth = timeLimitMs > 0 ? column * row : depth;
+                if (!ttKeep) clearTt();
                 auto move = searchBestMove(pos ^ mask, mask, turn, maxDepth, timeLimitMs);
                 changeBoard(pos, mask, move.second, false, false);
                 lastMove = move.second;
@@ -89,7 +97,7 @@ int main() {
                 }
             // 0 ou 1 peca = inicio de uma partida nova: limpa a tabela de
             // transposicao, como o "new" faz (senao ela cresce sem limite)
-            if (__builtin_popcountll(all) <= 1)
+            if (!ttKeep || __builtin_popcountll(all) <= 1)
                 clearTt();
             int maxDepth = timeLimitMs > 0 ? column * row : depth;
             auto move = searchBestMove(mine, all, false, maxDepth, timeLimitMs);
