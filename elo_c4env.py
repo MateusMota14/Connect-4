@@ -166,11 +166,11 @@ def _performance_elo(results, elos):
     return (lo + hi) / 2
 
 
-def run_duel(exe, depth, time_ms, games, workers):
+def run_duel(exe, depth, time_ms, games, workers, seed=0):
     import connect_four_gymnasium.players as players
     elos = {name: getattr(players, name)().getElo() for name in DUEL_OPPONENTS}
     # divide as partidas de cada adversario entre os processos
-    tasks, seed = [], 0
+    tasks = []
     per = max(1, workers // len(DUEL_OPPONENTS))
     for name in DUEL_OPPONENTS:
         base, extra = divmod(games, per)
@@ -210,6 +210,9 @@ def main():
                              "e N contra o SelfTrained7, em paralelo e sem janela")
     parser.add_argument("--workers", type=int, default=8,
                         help="processos em paralelo no --duel (padrao: 8)")
+    parser.add_argument("--seed", type=int, default=0,
+                        help="semente inicial do --duel; use valores diferentes para que rodadas "
+                             "repetidas tenham partidas diferentes (padrao: 0)")
     args = parser.parse_args()
 
     busca = f"{args.time} ms por lance" if args.time else f"profundidade {args.depth}"
@@ -217,7 +220,7 @@ def main():
     if args.duel:
         print(f"Duelo de {args.engine} ({busca}): {args.duel} partidas contra cada um de "
               f"{', '.join(DUEL_OPPONENTS)}...")
-        elo = run_duel(args.engine, args.depth, args.time, args.duel, args.workers)
+        elo = run_duel(args.engine, args.depth, args.time, args.duel, args.workers, args.seed)
         if elo is None:
             print("Elo fora da escala (0% ou 100% dos pontos).")
         else:
