@@ -663,7 +663,7 @@ def plot_depthduel_results(records, save_path, depth_a, depth_b):
 def _ludolab_read_state(page):
     """Le o tabuleiro renderizado pelo site.
 
-    Retorna (columns, mover, game_over):
+    Retorna (columns, mover, game_over, has_victory):
       columns: lista de 7 listas (uma por coluna), cada uma com "player1"/
                "player2" na ordem em que as pecas foram empilhadas de baixo
                para cima.
@@ -674,6 +674,10 @@ def _ludolab_read_state(page):
                  ausencia de uma casa "playable" porque ela some por um
                  instante durante a animacao de queda da peca e durante o
                  tempo de calculo da IA.
+      has_victory: o site marcou uma vitoria. Devolvido separado de game_over
+                 porque o lance vencedor pode ser tambem o que enche o
+                 tabuleiro -- nesse caso so a contagem de pecas nao distingue
+                 vitoria de empate.
     """
     cols = page.query_selector_all(".c4-board > .column")
     columns = []
@@ -692,7 +696,89 @@ def _ludolab_read_state(page):
         columns.append(pieces)
     total_pieces = sum(len(c) for c in columns)
     game_over = has_victory or total_pieces == COLS * ROWS
-    return columns, mover, game_over
+    return columns, mover, game_over, has_victory
+
+
+def _ludolab_estado_estavel(page, poll=0.15, timeout=60):
+    """Le o tabuleiro ate duas leituras seguidas baterem.
+
+    Sem isso a leitura pode pegar o DOM no meio da animacao de queda, com a
+    peca ainda sem a classe "token" -- foi essa leitura parcial que fazia o
+    log divergir do tabuleiro real."""
+    deadline = time.time() + timeout
+    anterior = None
+    while time.time() < deadline:
+        columns, mover, over, vitoria = _ludolab_read_state(page)
+        if columns == anterior:
+            return columns, mover, over, vitoria
+        anterior = columns
+        page.wait_for_timeout(int(poll * 1000))
+    raise TimeoutError("O tabuleiro em ludolab.net nao parou de mudar.")
+
+
+def _ludolab_novas_pecas(antes, depois):
+    """Pecas que apareceram entre dois estados, como lista de (coluna, lado).
+
+    Tambem confere que as pecas que ja existiam continuam iguais: o tabuleiro
+    so pode crescer. Se nao crescer, perdemos o sincronismo com o site e e
+    melhor abortar do que gravar uma partida que nao aconteceu."""
+    novas = []
+    for c, (a, d) in enumerate(zip(antes, depois)):
+        if len(d) < len(a) or list(d[:len(a)]) != list(a):
+            raise RuntimeError(
+                f"o tabuleiro do site divergiu do que acompanhavamos na coluna {c}: "
+                f"antes {a}, agora {d}")
+        for lado in d[len(a):]:
+            novas.append((c, lado))
+    return novas
+
+
+def _ludolab_com_peca(estado, col, lado):
+    """Estado + uma peca, para avancar a referencia lance a lance.
+
+    Avancamos so pela peca que acabamos de contabilizar, e nao pelo snapshot
+    inteiro: se o adversario responder rapido, a peca dele ja aparece na
+    mesma leitura e precisa continuar sendo "nova" na proxima verificacao."""
+    novo = [list(c) for c in estado]
+    novo[col].append(lado)
+    return novo
+
+
+def _ludolab_vencedor(columns):
+    """Lado que tem 4 em linha no tabuleiro, ou None.
+
+    Olhamos o tabuleiro em vez de confiar em "quem jogou por ultimo": o lance
+    vencedor do adversario pode cair enquanto lemos, e nesse instante o site ja
+    sinaliza fim de jogo sem a peca nova ter aparecido. Atribuir a vitoria ao
+    ultimo lance que registramos dava a partida para o lado errado."""
+    def lado(c, r):
+        return columns[c][r] if 0 <= c < COLS and 0 <= r < len(columns[c]) else None
+
+    for c in range(COLS):
+        for r in range(len(columns[c])):
+            s = columns[c][r]
+            for dc, dr in ((1, 0), (0, 1), (1, 1), (1, -1)):
+                if all(lado(c + dc * k, r + dr * k) == s for k in range(4)):
+                    return s
+    return None
+
+
+def _ludolab_resultado(columns, has_victory, nosso_lado):
+    """Resultado a partir do estado final do site.
+
+    A vitoria tem precedencia sobre o tabuleiro cheio: o lance vencedor pode
+    ser justamente o 42o, e testar so a contagem transformaria essa vitoria em
+    empate. Devolve None quando o jogo nao terminou de fato -- inclusive quando
+    o site marca vitoria mas o tabuleiro nao mostra 4 em linha, caso em que
+    preferimos abortar a chutar um vencedor."""
+    vencedor = _ludolab_vencedor(columns)
+    if vencedor is not None:
+        return "ours" if vencedor == nosso_lado else "ludolab"
+    if has_victory:
+        return None
+    if sum(len(c) for c in columns) == COLS * ROWS:
+        return "empate"
+    return None
 
 
 def _ludolab_configure(page, ai_level, our_side):
@@ -705,25 +791,51 @@ def _ludolab_configure(page, ai_level, our_side):
     page.wait_for_timeout(500)
 
 
-def _ludolab_click_column(page, col):
+def _ludolab_joga(page, col, estado, nosso_lado, poll=0.2, timeout=30):
+    """Clica na coluna e so retorna depois de ver a nossa peca no tabuleiro.
+
+    Antes o codigo clicava e ja dava o lance como certo. Quando o clique nao
+    se materializava (coluna cheia no site, clique engolido), a contagem local
+    ficava um a mais para sempre e os lances seguintes do adversario deixavam
+    de ser detectados. Agora confirmamos pelo DOM, e se a peca aparecer em
+    outra coluna -- ou nao aparecer -- abortamos em vez de seguir gravando uma
+    partida que nao corresponde ao site.
+
+    Devolve (estado_novo, over)."""
     page.query_selector_all(".c4-board > .column")[col].click()
-    page.wait_for_timeout(250)
-
-
-def _ludolab_wait_for_move(page, known_counts, poll=0.2, timeout=60):
-    """Espera ate que uma coluna ganhe uma peca nova (retorna seu indice) ou
-    o jogo termine (retorna None). known_counts e a contagem de pecas por
-    coluna vista antes dessa espera."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         page.wait_for_timeout(int(poll * 1000))
-        columns, _mover, over = _ludolab_read_state(page)
-        counts = [len(c) for c in columns]
-        for i, (before, now) in enumerate(zip(known_counts, counts)):
-            if now > before:
-                return i, columns
+        columns, _mover, over, _vit = _ludolab_estado_estavel(page, timeout=timeout)
+        nossas = [c for c, lado in _ludolab_novas_pecas(estado, columns)
+                  if lado == nosso_lado]
+        if nossas == [col]:
+            return _ludolab_com_peca(estado, col, nosso_lado), over
+        if nossas:
+            raise RuntimeError(
+                f"clicamos na coluna {col}, mas a nossa peca apareceu em {nossas}")
+    raise RuntimeError(
+        f"o clique na coluna {col} nao apareceu no tabuleiro de ludolab.net")
+
+
+def _ludolab_espera_adversario(page, estado, lado_adversario, poll=0.2, timeout=60):
+    """Espera a peca nova do adversario, identificada pela propria classe dela
+    no DOM (e nao por diferenca de contagem, que nao distingue de quem e a
+    peca). Devolve (coluna, estado_novo, over); coluna e None se o jogo
+    terminou sem lance novo."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        page.wait_for_timeout(int(poll * 1000))
+        columns, _mover, over, _vit = _ludolab_estado_estavel(page, timeout=timeout)
+        novas = _ludolab_novas_pecas(estado, columns)
+        deles = [c for c, lado in novas if lado == lado_adversario]
+        if deles:
+            return deles[0], _ludolab_com_peca(estado, deles[0], lado_adversario), over
+        if novas:
+            raise RuntimeError(
+                f"apareceu uma peca nossa fora de hora, nas colunas {[c for c, _ in novas]}")
         if over:
-            return None, columns
+            return None, estado, over
     raise TimeoutError("O adversario em ludolab.net demorou demais para jogar.")
 
 
@@ -801,8 +913,9 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
             we_are_first = current_side == "player1"
             engine.new_game(human_starts=not we_are_first)
 
-            counts = [0] * COLS
-            last_mover = None
+            nosso_lado = current_side
+            lado_deles = _flip_side(current_side)
+            estado = [[] for _ in range(COLS)]
             move_log = []
 
             def report(col, side, eval_value):
@@ -812,20 +925,40 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
                 emit("move", col, side, eval_value)
                 move_log.append({"col": col, "side": side})
 
+            def encerra(estado_atual, tentativas=10, poll=0.3):
+                """Le o estado final do site e decide o resultado pelo tabuleiro.
+
+                O lance vencedor do adversario pode estar caindo justamente
+                agora: o site ja marca fim de jogo e a peca ainda nao apareceu.
+                Por isso insistimos algumas vezes ate o tabuleiro sustentar um
+                resultado, e registramos no log qualquer peca que tenha
+                aparecido nesse meio-tempo. Se mesmo assim nao fechar, levanta
+                -- e melhor abortar do que gravar um vencedor chutado."""
+                for _ in range(tentativas):
+                    columns, _mover, _over, vitoria = _ludolab_estado_estavel(page)
+                    for c, lado in _ludolab_novas_pecas(estado_atual, columns):
+                        estado_atual = _ludolab_com_peca(estado_atual, c, lado)
+                        report(c, "ours" if lado == nosso_lado else "ludolab", None)
+                    res = _ludolab_resultado(columns, vitoria, nosso_lado)
+                    if res is not None:
+                        return res
+                    page.wait_for_timeout(int(poll * 1000))
+                raise RuntimeError(
+                    "ludolab.net sinalizou fim de jogo, mas o tabuleiro nao sustenta "
+                    f"nenhum resultado ({sum(len(c) for c in columns)} pecas, "
+                    f"vitoria marcada={vitoria})")
+
             if we_are_first:
                 col = engine.moves.get(timeout=engine_timeout)
-                _ludolab_click_column(page, col)
-                counts[col] += 1
+                estado, _over = _ludolab_joga(page, col, estado, nosso_lado)
                 report(col, "ours", next_eval())
-                last_mover = "ours"
             else:
                 # o lance de abertura da IA acontece como efeito colateral
                 # do clique em "Play" dentro de _ludolab_configure
-                opp_col, _ = _ludolab_wait_for_move(page, counts, timeout=30)
+                opp_col, estado, _over = _ludolab_espera_adversario(
+                    page, estado, lado_deles, timeout=30)
                 if opp_col is None:
                     raise RuntimeError("Esperava o primeiro lance da IA e o jogo ja terminou.")
-                counts[opp_col] += 1
-                last_mover = "ludolab"
 
                 # manda o lance antes de reportar: a avaliacao pos-lance do
                 # adversario so existe depois que o motor aplica esse lance
@@ -833,47 +966,42 @@ def run_ludolab_match(exe_path, depth=8, ai_level=5, our_side="player1",
                 report(opp_col, "ludolab", next_eval())
 
                 col = engine.moves.get(timeout=engine_timeout)
-                _ludolab_click_column(page, col)
-                counts[col] += 1
+                estado, _over = _ludolab_joga(page, col, estado, nosso_lado)
                 report(col, "ours", next_eval())
-                last_mover = "ours"
 
             resultado = None
             while resultado is None:
-                _columns, _mover, over = _ludolab_read_state(page)
-                if over:
-                    total = sum(len(c) for c in _columns)
-                    resultado = "empate" if total == COLS * ROWS else last_mover
+                columns, _mover, over, vitoria = _ludolab_estado_estavel(page)
+                if over and not _ludolab_novas_pecas(estado, columns):
+                    resultado = encerra(estado)
                     break
 
-                opp_col, columns = _ludolab_wait_for_move(page, counts)
+                opp_col, estado, over = _ludolab_espera_adversario(
+                    page, estado, lado_deles)
                 if opp_col is None:
-                    total = sum(len(c) for c in columns)
-                    resultado = "empate" if total == COLS * ROWS else last_mover
+                    resultado = encerra(estado)
                     break
-                counts[opp_col] += 1
-                last_mover = "ludolab"
 
                 # essa jogada do adversario pode ter terminado o jogo -- so
                 # pedimos e clicamos a resposta do nosso motor se ainda
                 # houver jogo (senao esbarramos no modal de fim de partida)
-                _columns2, _mover2, over2 = _ludolab_read_state(page)
-                if over2:
+                if over:
                     # o motor nunca vai receber esse "play", entao nao existe
                     # avaliacao pos-lance para mostrar
                     report(opp_col, "ludolab", None)
-                    total = sum(len(c) for c in _columns2)
-                    resultado = "empate" if total == COLS * ROWS else last_mover
+                    resultado = encerra(estado)
                     break
 
                 engine.play(opp_col)
                 report(opp_col, "ludolab", next_eval())
 
                 col = engine.moves.get(timeout=engine_timeout)
-                _ludolab_click_column(page, col)
-                counts[col] += 1
+                estado, over = _ludolab_joga(page, col, estado, nosso_lado)
                 report(col, "ours", next_eval())
-                last_mover = "ours"
+
+                if over:
+                    resultado = encerra(estado)
+                    break
 
             engine.quit()
             placar[resultado] += 1
@@ -1103,6 +1231,9 @@ class LudolabWatchGUI:
 
         self.board = [["*"] * ROWS for _ in range(COLS)]
         self.games = games
+        # placar corrente, atualizado ao fim de cada partida (o evento "final"
+        # so chega quando a rodada inteira termina)
+        self.placar = {"ours": 0, "ludolab": 0, "empate": 0}
         self.events = queue.Queue()
 
         self._draw_board()
@@ -1129,6 +1260,11 @@ class LudolabWatchGUI:
             pass
         self.root.after(100, self._poll)
 
+    def _atualiza_placar(self):
+        self.placar_var.set(
+            f"Nosso motor {self.placar['ours']} x {self.placar['ludolab']} ludolab AI "
+            f"({self.placar['empate']} empates)")
+
     def _handle_event(self, event):
         kind = event[0]
         if kind == "new_game":
@@ -1154,11 +1290,11 @@ class LudolabWatchGUI:
                      "ludolab": "ludolab AI venceu essa partida",
                      "empate": "Empate nessa partida"}[resultado]
             self.status_var.set(texto)
+            self.placar[resultado] += 1
+            self._atualiza_placar()
         elif kind == "final":
-            placar = event[1]
-            self.placar_var.set(
-                f"Nosso motor {placar['ours']} x {placar['ludolab']} ludolab AI "
-                f"({placar['empate']} empates)")
+            self.placar = event[1]
+            self._atualiza_placar()
             self.status_var.set("Partidas concluidas.")
         elif kind == "error":
             self.status_var.set(event[1])
@@ -1204,6 +1340,9 @@ class EngineMatchWatchGUI:
 
         self.board = [["*"] * ROWS for _ in range(COLS)]
         self.games = games
+        # placar corrente, atualizado ao fim de cada partida (o evento "final"
+        # so chega quando a rodada inteira termina)
+        self.placar = {"a": 0, "b": 0, "empate": 0}
         self.events = queue.Queue()
 
         self._draw_board()
@@ -1222,6 +1361,11 @@ class EngineMatchWatchGUI:
         except queue.Empty:
             pass
         self.root.after(100, self._poll)
+
+    def _atualiza_placar(self):
+        self.placar_var.set(
+            f"{self.label_a} {self.placar['a']} x {self.placar['b']} {self.label_b} "
+            f"({self.placar['empate']} empates)")
 
     def _handle_event(self, event):
         kind = event[0]
@@ -1250,11 +1394,11 @@ class EngineMatchWatchGUI:
                 quem = self.label_a if resultado == "a" else self.label_b
                 texto = f"{quem} venceu essa partida"
             self.status_var.set(texto)
+            self.placar[resultado] += 1
+            self._atualiza_placar()
         elif kind == "final":
-            placar = event[1]
-            self.placar_var.set(
-                f"{self.label_a} {placar['a']} x {placar['b']} {self.label_b} "
-                f"({placar['empate']} empates)")
+            self.placar = event[1]
+            self._atualiza_placar()
             self.status_var.set("Partidas concluidas.")
         elif kind == "error":
             self.status_var.set(event[1])
