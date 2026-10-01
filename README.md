@@ -175,3 +175,5 @@ This makes it easy to plug the engine into other front-ends or test harnesses.
 - Evaluate all windows of a direction at once with bitboard shifts (measured about 2× faster than the current per-window masks).
 - Smarter replacement policy for the transposition table (keep the deeper entry on collisions).
 - Time management with a total budget per game, spending more time in the opening.
+#   C h e s s  
+ 
